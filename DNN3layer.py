@@ -292,17 +292,7 @@ def train_ensemble_models(n_models, hidden1, lr, num_epochs, batch_size,
         models.append(model)
     
     return models
-    """Hyperparameter sweep over learning rates and hidden sizes.
 
-    Returns list of tuples: (lr, hidden_size, accuracy)
-    """
-    results = []
-    for lr in lr_list:
-        for h1 in hidden1_list:
-            acc = train_model(h1, lr, num_epochs=num_epochs_local, batch_size=batch_size_local, dataloader=dataloader, input_size=input_size, output_size=output_size)
-            results.append((lr, h1, acc))
-            print(f'sweep: lr={lr} h1={h1} acc={acc:.4f}')
-    return results
 
 
 
@@ -472,10 +462,19 @@ if __name__ == '__main__':
     acc_single = (tp + tn) / (tp + tn + fp + fn)
     sens_single = tp / (tp + fn) if (tp + fn) > 0 else 0
     spec_single = tn / (tn + fp) if (tn + fp) > 0 else 0
+    balanced_acc_single = (sens_single + spec_single) / 2
+    precision_single = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall_single = sens_single
+    f1_single = 2 * (precision_single * recall_single) / (precision_single + recall_single) if (precision_single + recall_single) > 0 else 0
     print(f'Accuracy:   {acc_single:.4f} ({acc_single*100:.2f}%)')
     print(f'Sensitivity: {sens_single:.4f}')
     print(f'Specificity: {spec_single:.4f}')
     print(f'ROC AUC:    {auc_single:.4f}')
+    print(f'Precision:  {precision_single:.4f}')
+    print(f'Recall:     {recall_single:.4f}')
+    print(f'Balanced Accuracy: {balanced_acc_single:.4f}')
+    print(f'F1 Score:   {f1_single:.4f}')   
+
     
     print('\n--- ENSEMBLE (3 models, with optimized threshold) ---')
     print(f'Confusion Matrix:\n{cm_ensemble}')
@@ -483,9 +482,17 @@ if __name__ == '__main__':
     acc_ensemble = (tp + tn) / (tp + tn + fp + fn)
     sens_ensemble = tp / (tp + fn) if (tp + fn) > 0 else 0
     spec_ensemble = tn / (tn + fp) if (tn + fp) > 0 else 0
+    balanced_acc_single = (sens_ensemble + spec_ensemble) / 2
+    precision_ensemble = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall_ensemble = sens_ensemble
+    f1_ensemble = 2 * (precision_ensemble * recall_ensemble) / (precision_ensemble + recall_ensemble) if (precision_ensemble + recall_ensemble) > 0 else 0
     print(f'Accuracy:   {acc_ensemble:.4f} ({acc_ensemble*100:.2f}%)')
     print(f'Sensitivity: {sens_ensemble:.4f}')
     print(f'Specificity: {spec_ensemble:.4f}')
     print(f'ROC AUC:    {auc_ensemble:.4f}')
+    print(f'Precision:  {precision_ensemble:.4f}')
+    print(f'Recall:     {recall_ensemble:.4f}')
+    print(f'Balanced Accuracy: {balanced_acc_single:.4f}')
+    print(f'F1 Score:   {f1_ensemble:.4f}')
     
     print('='*60)
