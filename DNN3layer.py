@@ -9,7 +9,7 @@ from sklearn.metrics import confusion_matrix, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, TensorDataset
-
+from imblearn.over_sampling import SMOTE
 
 class SimpleDNN(nn.Module):
     """Simple 3-layer network: input -> hidden -> output (logits).
@@ -64,6 +64,12 @@ class ImprovedDNN(nn.Module):
         x = self.fc3(x)  # logits for CrossEntropyLoss
         return x
 
+def SMOTE_oversample(X, y):
+    """Perform SMOTE oversampling to balance classes."""
+    
+    smote = SMOTE(random_state=42)
+    X_res, y_res = smote.fit_resample(X, y)
+    return X_res, y_res
 
 def train_model(hidden1, lr, num_epochs, batch_size, verbose=False, dataloader=None, input_size=None, output_size=None, **kwargs):
     """Train a model with given hyperparameters and return training accuracy."""
@@ -304,8 +310,8 @@ if __name__ == '__main__':
     print("Path to dataset files:", path)
 
     # Load dataset
-    data = pd.read_csv("/Users/parky/.cache/kagglehub/datasets/alexteboul/diabetes-health-indicators-dataset/versions/1/diabetes_binary_5050split_health_indicators_BRFSS2015.csv")
-    print(data.head())
+    data = pd.read_csv("diabetes_binary_health_indicators_BRFSS2015.csv")
+    # print(data.head())
     # Path: /Users/parky/.cache/kagglehub/datasets/alexteboul/diabetes-health-indicators-dataset/versions/1/diabetes_binary_health_indicators_BRFSS2015.csv
     # Note: determine features (X) and target (y) explicitly
     # This dataset's target is likely the first column; adjust if your CSV differs.
@@ -320,12 +326,31 @@ if __name__ == '__main__':
     input_size = X.shape[1]
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     scaler = StandardScaler()
+    X_train, y_train = SMOTE_oversample(X_train, y_train)
     X_train = scaler.fit_transform(X_train)
     X_test = scaler.transform(X_test)
     X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
     y_train_tensor = torch.tensor(y_train, dtype=torch.long)
     train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
     dataloader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
+
+    # Train simple model:
+    print("\n=== Training Simple Model ===")
+    simple_model = SimpleDNN(input_size, hidden_size=16, output_size=output_size)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.SGD(simple_model.parameters(), lr=0.01)
+    for epoch in range(10):
+        epoch_loss = 0.0
+        for batch_inputs, batch_labels in dataloader:
+            outputs = simple_model(batch_inputs)
+            loss = criterion(outputs, batch_labels)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item() * batch_inputs.size(0)
+        avg_loss = epoch_loss / len(dataloader.dataset)
+        print(f'Epoch [{epoch+1}/10], Loss: {avg_loss:.4f}')
+    print("Simple model training complete")
 
 
     # Example sweep - adjust lists as needed
@@ -416,7 +441,7 @@ if __name__ == '__main__':
         X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
         for model in ensemble_models:
             outputs = model(X_test_tensor)
-            probs = torch.softmax(outputs, dim=1)[:, 1].numpy()
+            probs = torch.softmax(outputs, dim=1)[:, 1].detach().numpy()
             ensemble_probs.append(probs)
     
     ensemble_avg_probs = np.mean(ensemble_probs, axis=0)
@@ -429,7 +454,7 @@ if __name__ == '__main__':
     with torch.no_grad():
         X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
         outputs = trained_model(X_test_tensor)
-        single_probs = torch.softmax(outputs, dim=1)[:, 1].numpy()
+        single_probs = torch.softmax(outputs, dim=1)[:, 1].detach().numpy()
     
     best_threshold_single, best_f1_single = find_best_threshold(y_test, single_probs)
     print(f"Best threshold for single model: {best_threshold_single:.3f} (F1={best_f1_single:.4f})")
@@ -438,6 +463,18 @@ if __name__ == '__main__':
     preds_single = (single_probs >= best_threshold_single).astype(int)
     preds_ensemble = (ensemble_avg_probs >= best_threshold_ensemble).astype(int)
 
+
+    # Results for simple model (for reference)    with torch.no_grad():
+    X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
+    outputs = simple_model(X_test_tensor)
+    simple_probs = torch.softmax(outputs, dim=1)[:, 1].detach().numpy()
+    simple_preds = (simple_probs >= 0.5).astype(int)  # default threshold 0.5
+    cm_simple = confusion_matrix(y_test.astype(int), simple_preds)
+    try:
+        auc_simple = roc_auc_score(y_test.astype(int), simple_probs)
+    except ValueError:
+        auc_simple = float('nan')
+    
     # Results for single model
     cm_single = confusion_matrix(y_test.astype(int), preds_single)
     try:
@@ -455,6 +492,25 @@ if __name__ == '__main__':
     print('\n' + '='*60)
     print('RESULTS SUMMARY')
     print('='*60)
+
+    print('\n--- SIMPLE MODEL (for reference) ---')
+    print(f'Confusion Matrix:\n{cm_simple}')
+    tn, fp, fn, tp = cm_simple.ravel()
+    acc_simple = (tp + tn) / (tp + tn + fp + fn)
+    sens_simple = tp / (tp + fn) if (tp + fn) > 0 else 0
+    spec_simple = tn / (tn + fp) if (tn + fp) > 0 else 0
+    balanced_acc_simple = (sens_simple + spec_simple) / 2
+    precision_simple = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall_simple = sens_simple
+    f1_simple = 2 * (precision_simple * recall_simple) / (precision_simple + recall_simple) if (precision_simple + recall_simple) > 0 else 0
+    print(f'Accuracy:   {acc_simple:.4f} ({acc_simple*100:.2f}%)')
+    print(f'Sensitivity: {sens_simple:.4f}')
+    print(f'Specificity: {spec_simple:.4f}')
+    print(f'ROC AUC:    {auc_simple:.4f}')
+    print(f'Precision:  {precision_simple:.4f}')
+    print(f'Recall:     {recall_simple:.4f}')
+    print(f'Balanced Accuracy: {balanced_acc_simple:.4f}')
+    print(f'F1 Score:   {f1_simple:.4f}')
     
     print('\n--- SINGLE MODEL (with optimized threshold) ---')
     print(f'Confusion Matrix:\n{cm_single}')
